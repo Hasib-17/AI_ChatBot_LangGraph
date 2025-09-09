@@ -1,0 +1,5 @@
+LangGraph
+langchain-core
+langchain_openai
+duckduckgo-search
+langchain-community

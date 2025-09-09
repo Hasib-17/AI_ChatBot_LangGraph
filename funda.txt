@@ -1,0 +1,18 @@
+LLM(model)->understand & generates human like text based on pattern in data.
+
+Agent->Uses an LLM to plan, use tools and take the best respective actions over time.
+
+LangGraph->Framework: build AI agent as graph,where each node does a task and edges decide what happen next.
+
+State : A data structure that is shared and holds the current information of the inter application. Ex- think of it as a game file, which save all needed things (health, score, weapons,..etc) needs to remember.
+
+
+Node: Self-contained functions or steps that carry out specific tasks
+
+Edges: Define how the process moves from one node to another, controlling the direction and logic of execution.
+
+Graph: The complete over-all design showing all levels, possible paths and decision points. How tasks(node) are link together.
+
+
+StateGraph: Class that builds and manage the entire graph-all of the nodes, edges, and shared state-ensuring smooth data flow coordinated execution.
+
