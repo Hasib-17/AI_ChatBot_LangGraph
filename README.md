@@ -2,7 +2,11 @@
 
 This project is a production-style chatbot built with LangGraph, LangChain, FastAPI, and SQLite-backed persistent memory. Every request loads the stored history for a `session_id`, appends the new user message, invokes `gpt-4o-mini` with the full conversation context, persists the updated turn, and returns the assistant reply.
 
-## Architecture
+## System Architecture
+
+![System Architecture](image/its_image.png)
+
+
 
 The request flow is:
 
