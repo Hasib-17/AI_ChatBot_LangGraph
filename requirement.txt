@@ -1,5 +1,9 @@
-LangGraph
+langgraph
 langchain-core
 langchain_openai
 duckduckgo-search
 langchain-community
+python-dotenv
+fastapi
+uvicorn
+pytest

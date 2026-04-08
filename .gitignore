@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 venv/
 .envrc
+data/
 
 # OS / Editor
 .DS_Store
