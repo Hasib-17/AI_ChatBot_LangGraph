@@ -1,16 +1,25 @@
 from __future__ import annotations
 
-from langchain_openai import ChatOpenAI
-
 from app.config import Settings
 
 
-def build_llm(settings: Settings) -> ChatOpenAI:
-    if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY is required to initialize the chatbot.")
+def build_llm(settings: Settings):
+    if settings.llm_provider == "openai":
+        from langchain_openai import ChatOpenAI
 
-    return ChatOpenAI(
-        model=settings.model_name,
-        temperature=0,
-        api_key=settings.openai_api_key,
-    )
+        return ChatOpenAI(
+            model=settings.model_name,
+            temperature=0,
+            api_key=settings.openai_api_key,
+        )
+
+    if settings.llm_provider == "groq":
+        from langchain_groq import ChatGroq
+
+        return ChatGroq(
+            model=settings.model_name,
+            temperature=0,
+            api_key=settings.groq_api_key,
+        )
+
+    raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

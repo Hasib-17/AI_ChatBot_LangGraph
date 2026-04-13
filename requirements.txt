@@ -1,0 +1,10 @@
+duckduckgo-search==8.1.1
+fastapi==0.135.3
+langchain-community==0.4.1
+langchain-core==1.2.27
+langchain-groq==1.0.1
+langchain-openai==1.1.12
+langgraph==1.1.6
+pytest==9.0.3
+python-dotenv==1.2.2
+uvicorn==0.44.0

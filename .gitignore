@@ -3,15 +3,20 @@
 .env.*
 *.env
 !.env.example
+
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
 .venv/
 venv/
 .envrc
-data/
+*.db
+*.sqlite
+*.sqlite3
 
 # OS / Editor
 .DS_Store
