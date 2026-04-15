@@ -134,7 +134,7 @@ def create_app(
     )
     async def chat(request: ChatRequest) -> ChatResponse:
         try:
-            result = app.state.graph.invoke(
+            result = await app.state.graph.ainvoke(
                 {
                     "session_id": request.session_id,
                     "chat_history": [],
