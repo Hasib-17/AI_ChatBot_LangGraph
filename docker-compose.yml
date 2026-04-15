@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  chatbot:
+    build: .
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    restart: unless-stopped
