@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, List
 
@@ -33,6 +34,18 @@ def role_to_message(role: str, content: str) -> BaseMessage:
     if message_cls is None:
         raise ValueError(f"Unsupported role in storage: {role}")
     return message_cls(content=content)
+
+
+@dataclass(frozen=True)
+class StoredMessage:
+    id: int
+    message: BaseMessage
+
+
+@dataclass(frozen=True)
+class SummaryState:
+    summary_text: str
+    summarized_upto_message_id: int
 
 
 class SQLiteChatHistoryStore:
@@ -73,13 +86,26 @@ class SQLiteChatHistoryStore:
                 ON chat_messages (session_id, id)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_summaries (
+                    session_id TEXT PRIMARY KEY,
+                    summary_text TEXT NOT NULL,
+                    summarized_upto_message_id INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
         logger.info("SQLite chat history store ready at %s", self.database_path)
 
     def load_history(self, session_id: str) -> List[BaseMessage]:
+        return [stored.message for stored in self.load_history_with_ids(session_id)]
+
+    def load_history_with_ids(self, session_id: str) -> List[StoredMessage]:
         with self.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT role, content
+                SELECT id, role, content
                 FROM chat_messages
                 WHERE session_id = ?
                 ORDER BY id ASC
@@ -87,7 +113,13 @@ class SQLiteChatHistoryStore:
                 (session_id,),
             ).fetchall()
 
-        history = [role_to_message(row["role"], row["content"]) for row in rows]
+        history = [
+            StoredMessage(
+                id=int(row["id"]),
+                message=role_to_message(row["role"], row["content"]),
+            )
+            for row in rows
+        ]
         logger.debug("Loaded %s messages for session %s", len(history), session_id)
         return history
 
@@ -109,10 +141,53 @@ class SQLiteChatHistoryStore:
             )
         logger.debug("Persisted %s messages for session %s", len(messages), session_id)
 
+    def load_summary_state(self, session_id: str) -> SummaryState:
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT summary_text, summarized_upto_message_id
+                FROM chat_summaries
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return SummaryState(summary_text="", summarized_upto_message_id=0)
+        return SummaryState(
+            summary_text=row["summary_text"],
+            summarized_upto_message_id=int(row["summarized_upto_message_id"]),
+        )
+
+    def upsert_summary_state(
+        self, session_id: str, summary_text: str, summarized_upto_message_id: int
+    ) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_summaries (
+                    session_id,
+                    summary_text,
+                    summarized_upto_message_id,
+                    updated_at
+                )
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    summary_text = excluded.summary_text,
+                    summarized_upto_message_id = excluded.summarized_upto_message_id,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (session_id, summary_text, summarized_upto_message_id),
+            )
+        logger.debug("Persisted summary state for session %s", session_id)
+
     def clear_session(self, session_id: str) -> None:
         with self.connection() as conn:
             conn.execute(
                 "DELETE FROM chat_messages WHERE session_id = ?",
+                (session_id,),
+            )
+            conn.execute(
+                "DELETE FROM chat_summaries WHERE session_id = ?",
                 (session_id,),
             )
         logger.info("Cleared chat history for session %s", session_id)

@@ -25,6 +25,9 @@ class Settings:
         "conversation history to answer consistently and contextually."
     )
     database_path: str = "data/chat_memory.db"
+    memory_strategy: str = "sliding_window"
+    memory_window_size: int = 12
+    max_context_tokens: int = 6000
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     log_level: str = "INFO"
@@ -48,6 +51,9 @@ class Settings:
                 "full conversation history to answer consistently and contextually.",
             ),
             database_path=os.getenv("DATABASE_PATH", "data/chat_memory.db"),
+            memory_strategy=os.getenv("MEMORY_STRATEGY", "sliding_window").lower(),
+            memory_window_size=int(os.getenv("MEMORY_WINDOW_SIZE", "12")),
+            max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "6000")),
             api_host=os.getenv("API_HOST", "127.0.0.1"),
             api_port=int(os.getenv("API_PORT", "8000")),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
@@ -64,6 +70,14 @@ class Settings:
             raise ConfigError("MODEL_NAME must not be empty.")
         if not self.database_path.strip():
             raise ConfigError("DATABASE_PATH must not be empty.")
+        if self.memory_strategy not in {"sliding_window", "summary_window"}:
+            raise ConfigError(
+                "MEMORY_STRATEGY must be either 'sliding_window' or 'summary_window'."
+            )
+        if self.memory_window_size < 1:
+            raise ConfigError("MEMORY_WINDOW_SIZE must be at least 1.")
+        if self.max_context_tokens < 128:
+            raise ConfigError("MAX_CONTEXT_TOKENS must be at least 128.")
         if not self.api_host.strip():
             raise ConfigError("API_HOST must not be empty.")
         if not 1 <= self.api_port <= 65535:

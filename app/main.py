@@ -64,6 +64,9 @@ def create_app(
                 store=app.state.store,
                 llm=build_llm(resolved_settings),
                 system_prompt=resolved_settings.system_prompt,
+                memory_strategy=resolved_settings.memory_strategy,
+                memory_window_size=resolved_settings.memory_window_size,
+                max_context_tokens=resolved_settings.max_context_tokens,
             )
         app.state.settings = resolved_settings
         logger.info("Application initialized")

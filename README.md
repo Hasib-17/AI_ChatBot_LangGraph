@@ -1,6 +1,6 @@
 # Memory-Powered AI Chatbot
 
-This project is a FastAPI chatbot built with LangGraph, LangChain, and SQLite-backed persistent memory. It supports provider-based LLM configuration and is set up to use Groq by default. Each request reloads the stored conversation for a `session_id`, appends the new user message, invokes the model with the conversation context, persists the assistant reply, and returns the updated history.
+This project is a FastAPI chatbot built with LangGraph, LangChain, and SQLite-backed persistent memory. It supports provider-based LLM configuration and is set up to use Groq by default. Each request reloads the stored conversation for a `session_id`, builds a bounded prompt context (sliding window or summary + window), invokes the model, persists the new turn, and returns the updated history.
 ## Architecture
 
 ![System Architecture](image/its_image.png)
@@ -56,6 +56,14 @@ Expected response:
 pytest
 ```
 
+## Memory Controls
+
+- `MEMORY_STRATEGY` controls context assembly (`sliding_window` or `summary_window`).
+- `MEMORY_WINDOW_SIZE` controls how many recent message pairs are kept verbatim.
+- `MAX_CONTEXT_TOKENS` sets a rough context cap using `chars // 4` token estimation.
+- The system prompt is always placed at index `0` in the model input.
+- For `summary_window`, rolling summary state is persisted in SQLite (`chat_summaries`) so it survives restarts.
+
 ## Example Chat Request
 
 ```bash
@@ -101,6 +109,7 @@ Because the same `session_id` is reused, the application loads the earlier conve
 app/
   __init__.py
   config.py
+  context_window.py
   graph.py
   llm.py
   main.py
@@ -122,10 +131,10 @@ requirements.txt
 1. The client sends `session_id` and `message` to `POST /chat`.
 2. FastAPI receives the request in `app/main.py`.
 3. The LangGraph `StateGraph` invokes `process_message`.
-4. `process_message` loads the full session history from SQLite.
-5. On a new session, a system prompt is inserted first.
-6. The new human message is appended.
-7. The configured LLM provider receives the conversation history.
+4. `process_message` loads persistent history and summary state from SQLite.
+5. A bounded model context is assembled using the configured memory strategy and token cap.
+6. The system prompt is always placed at position `0`, then recent/summary context and the new user message are appended.
+7. The configured LLM provider receives this bounded context.
 8. The assistant reply is appended and written back to SQLite.
 9. The API returns the assistant reply and the updated history.
 
@@ -135,3 +144,4 @@ requirements.txt
 - Each stored message contains `session_id`, `role`, `content`, and a timestamp.
 - Messages are loaded in insertion order for each session.
 - System, human, and AI messages are persisted so later turns can reuse context.
+- Summary mode persists rolling summaries in `chat_summaries` with `summarized_upto_message_id`.
