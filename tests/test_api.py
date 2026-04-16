@@ -12,20 +12,33 @@ from app.main import create_app, run
 
 
 class StubGraph:
-    def invoke(self, state):
-        return {
-            "session_id": state["session_id"],
-            "assistant_response": "stubbed reply",
-            "chat_history": [
+    def __init__(self, store=None):
+        self.store = store
+
+    async def ainvoke(self, state):
+        session_id = state["session_id"]
+        user_msg = HumanMessage(content=state["user_message"])
+        ai_msg = AIMessage(content="stubbed reply")
+        
+        if self.store:
+            self.store.append_messages(session_id, [user_msg, ai_msg])
+            history = self.store.load_history(session_id)
+        else:
+            history = [
                 SystemMessage(content="system prompt"),
-                HumanMessage(content=state["user_message"]),
-                AIMessage(content="stubbed reply"),
-            ],
+                user_msg,
+                ai_msg,
+            ]
+            
+        return {
+            "session_id": session_id,
+            "assistant_response": "stubbed reply",
+            "chat_history": history,
         }
 
 
 class FailingGraph:
-    def invoke(self, state):
+    async def ainvoke(self, state):
         raise RuntimeError("model exploded")
 
 
@@ -135,11 +148,10 @@ def test_missing_groq_api_key_fails_during_startup(tmp_path):
 
 
 def test_run_exits_cleanly_when_required_config_is_missing(tmp_path, monkeypatch):
-    from app import main as app_main
-
+    from app.main import run
+    
     monkeypatch.setattr(
-        app_main,
-        "settings",
+        "app.main.settings",
         build_settings(tmp_path, llm_provider="groq", groq_api_key=""),
     )
 
@@ -147,3 +159,67 @@ def test_run_exits_cleanly_when_required_config_is_missing(tmp_path, monkeypatch
         run()
 
     assert exc_info.value.code == 1
+
+
+def test_session_management_endpoints(tmp_path):
+    from app.memory import SQLiteChatHistoryStore
+
+    store = SQLiteChatHistoryStore(str(tmp_path / "chat.db"))
+    app = create_app(
+        settings=build_settings(tmp_path), graph=StubGraph(store=store), store=store
+    )
+
+    # 1. Create a session by chatting
+    resp1 = request(
+        app,
+        "POST",
+        "/chat",
+        json={"session_id": "test-session-123", "message": "hello"},
+    )
+    assert resp1.status_code == 200
+
+    # 2. GET /sessions should return the session
+    resp_sessions = request(app, "GET", "/sessions")
+    assert resp_sessions.status_code == 200
+    data = resp_sessions.json()
+    assert len(data["sessions"]) == 1
+    assert data["sessions"][0]["session_id"] == "test-session-123"
+
+    # 3. GET /sessions/{session_id}/history should return the message history
+    resp_history = request(app, "GET", "/sessions/test-session-123/history")
+    assert resp_history.status_code == 200
+    history = resp_history.json()
+    assert len(history) == 2
+    assert history[0]["role"] == "human"
+    assert history[0]["content"] == "hello"
+    assert history[1]["role"] == "ai"
+    assert history[1]["content"] == "stubbed reply"
+
+    # 4. DELETE /sessions/{session_id} should succeed
+    resp_delete = request(app, "DELETE", "/sessions/test-session-123")
+    assert resp_delete.status_code == 204
+
+    # 5. GET /sessions/{session_id}/history after delete should return 404
+    resp_history_after = request(app, "GET", "/sessions/test-session-123/history")
+    assert resp_history_after.status_code == 404
+
+    # 6. DELETE a non-existent session returns 404
+    resp_delete_again = request(app, "DELETE", "/sessions/test-session-123")
+    assert resp_delete_again.status_code == 404
+
+    # 7. Starting a new chat after deletion works cleanly
+    resp2 = request(
+        app,
+        "POST",
+        "/chat",
+        json={"session_id": "test-session-123", "message": "hello again"},
+    )
+    assert resp2.status_code == 200
+
+    # history should only contain the new interaction
+    resp_history_restart = request(app, "GET", "/sessions/test-session-123/history")
+    assert resp_history_restart.status_code == 200
+    history_restart = resp_history_restart.json()
+    assert len(history_restart) == 2
+    assert history_restart[0]["content"] == "hello again"
+

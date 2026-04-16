@@ -180,14 +180,50 @@ class SQLiteChatHistoryStore:
             )
         logger.debug("Persisted summary state for session %s", session_id)
 
-    def clear_session(self, session_id: str) -> None:
+    def clear_session(self, session_id: str) -> bool:
         with self.connection() as conn:
-            conn.execute(
+            cursor1 = conn.execute(
                 "DELETE FROM chat_messages WHERE session_id = ?",
                 (session_id,),
             )
-            conn.execute(
+            cursor2 = conn.execute(
                 "DELETE FROM chat_summaries WHERE session_id = ?",
                 (session_id,),
             )
-        logger.info("Cleared chat history for session %s", session_id)
+            found = cursor1.rowcount > 0 or cursor2.rowcount > 0
+
+        if found:
+            logger.info("Cleared chat history for session %s", session_id)
+        return found
+
+    def session_exists(self, session_id: str) -> bool:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM chat_messages WHERE session_id = ? LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if row:
+                return True
+            row = conn.execute(
+                "SELECT 1 FROM chat_summaries WHERE session_id = ? LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            return row is not None
+
+    def list_sessions(self, limit: int = 100, offset: int = 0) -> List[dict]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, MAX(last_active) as last_active
+                FROM (
+                    SELECT session_id, created_at as last_active FROM chat_messages
+                    UNION ALL
+                    SELECT session_id, updated_at as last_active FROM chat_summaries
+                )
+                GROUP BY session_id
+                ORDER BY last_active DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [dict(row) for row in rows]

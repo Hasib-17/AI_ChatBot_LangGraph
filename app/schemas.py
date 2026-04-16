@@ -36,3 +36,13 @@ class ErrorDetail(BaseModel):
 
 class ErrorEnvelope(BaseModel):
     error: ErrorDetail
+
+
+class SessionListItem(BaseModel):
+    session_id: str
+    last_active: str
+
+
+class SessionsResponse(BaseModel):
+    sessions: List[SessionListItem]
+    total_count: int | None = None

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from app.config import ConfigError, Settings, configure_logging, ensure_runtime_dirs
 from app.graph import build_chat_graph
 from app.memory import SQLiteChatHistoryStore
-from app.schemas import ChatMessageView, ChatRequest, ChatResponse, ErrorEnvelope
+from app.schemas import ChatMessageView, ChatRequest, ChatResponse, ErrorEnvelope, SessionListItem, SessionsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +158,61 @@ def create_app(
             session_id=result["session_id"],
             reply=result["assistant_response"],
             history=[message_to_view(message) for message in result["chat_history"]],
+        )
+
+    @app.get(
+        "/sessions/{session_id}/history",
+        response_model=List[ChatMessageView],
+        responses={
+            404: {"model": ErrorEnvelope},
+        },
+    )
+    async def get_history(session_id: str) -> List[ChatMessageView]:
+        """
+        Retrieve the full message history for a specific session.
+        """
+        if not app.state.store.session_exists(session_id):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "session_not_found", "message": f"Session {session_id} not found"},
+            )
+
+        history = app.state.store.load_history(session_id)
+        return [message_to_view(msg) for msg in history]
+
+    @app.delete(
+        "/sessions/{session_id}",
+        status_code=204,
+        responses={
+            404: {"model": ErrorEnvelope},
+        },
+    )
+    async def delete_session(session_id: str):
+        """
+        Delete all messages and summary state for a specific session.
+        """
+        deleted = app.state.store.clear_session(session_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "session_not_found", "message": f"Session {session_id} not found"},
+            )
+        return
+
+    @app.get(
+        "/sessions",
+        response_model=SessionsResponse,
+    )
+    async def list_sessions(limit: int = 100, offset: int = 0) -> SessionsResponse:
+        """
+        List all chat sessions with their last active timestamps.
+        """
+        sessions = app.state.store.list_sessions(limit=limit, offset=offset)
+        return SessionsResponse(
+            sessions=[
+                SessionListItem(session_id=s["session_id"], last_active=s["last_active"])
+                for s in sessions
+            ]
         )
 
     return app
