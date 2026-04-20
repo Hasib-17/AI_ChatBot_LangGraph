@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.memory import SQLiteChatHistoryStore, StoredMessage
 
@@ -54,9 +54,10 @@ class ConversationContextManager:
             for record in history_with_ids
             if not isinstance(record.message, SystemMessage)
         ]
-        recent_limit = self.memory_window_size * 2
-        older_history = non_system_history[:-recent_limit] if recent_limit else non_system_history
-        recent_history = non_system_history[-recent_limit:] if recent_limit else []
+        turns = self._split_into_turns(non_system_history)
+        recent_turns = turns[-self.memory_window_size :] if self.memory_window_size else []
+        older_turns = turns[:-self.memory_window_size] if self.memory_window_size else turns
+        recent_history = [record for turn in recent_turns for record in turn]
 
         summary_text = ""
         summarized_upto_message_id = 0
@@ -66,11 +67,12 @@ class ConversationContextManager:
             summary_state = self.store.load_summary_state(session_id)
             summary_text = summary_state.summary_text
             summarized_upto_message_id = summary_state.summarized_upto_message_id
-            latest_older_id = older_history[-1].id if older_history else 0
+            latest_older_id = older_turns[-1][-1].id if older_turns else 0
             if latest_older_id > summarized_upto_message_id:
                 new_records = [
                     record
-                    for record in older_history
+                    for turn in older_turns
+                    for record in turn
                     if record.id > summarized_upto_message_id
                 ]
                 if new_records:
@@ -174,15 +176,28 @@ class ConversationContextManager:
         return mutable_recent, mutable_summary, mutable_summarized_upto, summary_changed
 
     def _pop_oldest_turn(self, recent_history: List[StoredMessage]) -> List[StoredMessage]:
-        if (
-            len(recent_history) >= 2
-            and isinstance(recent_history[0].message, HumanMessage)
-            and isinstance(recent_history[1].message, AIMessage)
-        ):
-            dropped = recent_history[:2]
-            del recent_history[:2]
-            return dropped
-        return [recent_history.pop(0)]
+        if not recent_history:
+            return []
+
+        dropped = [recent_history.pop(0)]
+        while recent_history and not isinstance(recent_history[0].message, HumanMessage):
+            dropped.append(recent_history.pop(0))
+        return dropped
+
+    def _split_into_turns(self, history_with_ids: Sequence[StoredMessage]) -> List[List[StoredMessage]]:
+        turns: List[List[StoredMessage]] = []
+        current_turn: List[StoredMessage] = []
+
+        for record in history_with_ids:
+            if current_turn and isinstance(record.message, HumanMessage):
+                turns.append(current_turn)
+                current_turn = []
+            current_turn.append(record)
+
+        if current_turn:
+            turns.append(current_turn)
+
+        return turns
 
     def _summarize_records(self, records: Sequence[StoredMessage]) -> str:
         lines: List[str] = []
@@ -191,6 +206,8 @@ class ConversationContextManager:
                 speaker = "User"
             elif isinstance(record.message, AIMessage):
                 speaker = "Assistant"
+            elif isinstance(record.message, ToolMessage):
+                speaker = "Tool"
             else:
                 speaker = "Message"
             text = record.message.content.replace("\n", " ").strip()

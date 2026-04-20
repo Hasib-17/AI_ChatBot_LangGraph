@@ -9,7 +9,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config import ConfigError, Settings, configure_logging, ensure_runtime_dirs
 from app.graph import build_chat_graph
@@ -26,6 +26,8 @@ def message_to_view(message) -> ChatMessageView:
         return ChatMessageView(role="human", content=message.content)
     if isinstance(message, AIMessage):
         return ChatMessageView(role="ai", content=message.content)
+    if isinstance(message, ToolMessage):
+        return ChatMessageView(role="tool", content=message.content)
     raise TypeError(f"Unsupported message type: {type(message)!r}")
 
 

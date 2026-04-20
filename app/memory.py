@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, List
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ ROLE_TO_CLASS = {
     "system": SystemMessage,
     "human": HumanMessage,
     "ai": AIMessage,
+    "tool": ToolMessage,
 }
 
 
@@ -26,13 +28,35 @@ def message_to_role(message: BaseMessage) -> str:
         return "human"
     if isinstance(message, AIMessage):
         return "ai"
+    if isinstance(message, ToolMessage):
+        return "tool"
     raise TypeError(f"Unsupported message type: {type(message)!r}")
 
 
-def role_to_message(role: str, content: str) -> BaseMessage:
+def message_to_metadata(message: BaseMessage) -> str:
+    metadata: dict[str, object] = {}
+    if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
+        metadata["tool_calls"] = message.tool_calls
+    if isinstance(message, ToolMessage):
+        metadata["tool_call_id"] = message.tool_call_id
+        if message.name:
+            metadata["name"] = message.name
+    return json.dumps(metadata, sort_keys=True)
+
+
+def role_to_message(role: str, content: str, metadata_json: str | None = None) -> BaseMessage:
     message_cls = ROLE_TO_CLASS.get(role)
     if message_cls is None:
         raise ValueError(f"Unsupported role in storage: {role}")
+
+    metadata = json.loads(metadata_json or "{}")
+    if message_cls is AIMessage:
+        return AIMessage(content=content, tool_calls=metadata.get("tool_calls", []))
+    if message_cls is ToolMessage:
+        tool_call_id = metadata.get("tool_call_id")
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            raise ValueError("Stored tool message is missing tool_call_id")
+        return ToolMessage(content=content, tool_call_id=tool_call_id, name=metadata.get("name"))
     return message_cls(content=content)
 
 
@@ -76,10 +100,19 @@ class SQLiteChatHistoryStore:
                     session_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    metadata TEXT NOT NULL DEFAULT '{}',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()
+            }
+            if "metadata" not in columns:
+                conn.execute(
+                    "ALTER TABLE chat_messages ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'"
+                )
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id_id
@@ -105,7 +138,7 @@ class SQLiteChatHistoryStore:
         with self.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT id, role, content
+                SELECT id, role, content, metadata
                 FROM chat_messages
                 WHERE session_id = ?
                 ORDER BY id ASC
@@ -116,7 +149,7 @@ class SQLiteChatHistoryStore:
         history = [
             StoredMessage(
                 id=int(row["id"]),
-                message=role_to_message(row["role"], row["content"]),
+                message=role_to_message(row["role"], row["content"], row["metadata"]),
             )
             for row in rows
         ]
@@ -128,14 +161,14 @@ class SQLiteChatHistoryStore:
             return
 
         payload = [
-            (session_id, message_to_role(message), message.content)
+            (session_id, message_to_role(message), message.content, message_to_metadata(message))
             for message in messages
         ]
         with self.connection() as conn:
             conn.executemany(
                 """
-                INSERT INTO chat_messages (session_id, role, content)
-                VALUES (?, ?, ?)
+                INSERT INTO chat_messages (session_id, role, content, metadata)
+                VALUES (?, ?, ?, ?)
                 """,
                 payload,
             )

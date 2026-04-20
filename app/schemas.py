@@ -19,7 +19,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatMessageView(BaseModel):
-    role: Literal["system", "human", "ai"]
+    role: Literal["system", "human", "ai", "tool"]
     content: str
 
 
